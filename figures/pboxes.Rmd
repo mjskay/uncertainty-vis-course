@@ -1,0 +1,179 @@
+---
+title: "Untitled"
+author: "Matthew Kay"
+date: '2022-06-28'
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(
+  dev = "png",
+  dev.args = list(png = list(type = "cairo")),
+  fig.retina = 2
+)
+```
+
+
+```{r setup}
+library(ggdist)
+library(distributional)
+library(tidyverse)
+
+theme_set(   theme_light(base_size = 14) + theme(axis.line.x = element_line(color = "gray70", 
+        size = rel(0.5)), axis.line.y = element_line(color = "gray70", 
+        size = rel(0.5)), axis.title.x = element_text(margin = margin(t = 7)), 
+        axis.title.y = element_text(margin = margin(r = 7)), 
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+        panel.border = element_blank(), strip.text = element_text(color = "black", 
+            margin = margin(6, 6, 6, 6)), strip.background = element_rect(fill = "gray90")))
+blue_ = "#4393c3"
+```
+
+
+```{r}
+set.seed(1234)
+n = 100
+df = tibble(
+  mu = rnorm(100, 2, 0.4),
+  sigma = rgamma(n, 100, 100),
+  mu_hat = dist_normal(mu, sigma)
+) |>
+  arrange(mu) |>
+  mutate(universe = 1:n)
+df
+```
+
+```{r}
+xmin = -3
+xmax = 6
+
+df |>
+  ggplot(aes(y = universe, xdist = mu_hat)) +
+  stat_pointinterval(color = blue_, point_color = "black", .width = .95) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  geom_vline(xintercept = 0, alpha = 0.25)
+```
+
+```{r}
+xmin = -3
+xmax = 6
+
+df |>
+  ggplot(aes(y = universe, xdist = mu_hat)) +
+  stat_pointinterval(aes(color = stat(xmin <= 0)), point_color = "black", .width = .95) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  geom_vline(xintercept = 0, alpha = 0.25) +
+  scale_color_brewer(palette = "Set2") +
+  guides(color = "none")
+```
+
+
+```{r}
+df |>
+  ggplot(aes(y = universe, xdist = mu_hat)) +
+  stat_gradientinterval(fill = blue_, point_color = "black", .width = 0, scale = 1) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  geom_vline(xintercept = 0, alpha = 0.25)
+
+```
+
+
+```{r}
+df |>
+  ggplot(aes(y = universe, xdist = mu_hat)) +
+  stat_slabinterval(scale = 6, fill = alpha(blue_, 0.25), .width = 0)+
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  # geom_segment(aes(x = mu, xend = mu, y = universe, yend = 0), color = "red") +
+  geom_vline(xintercept = 0, alpha = 0.25)
+```
+
+
+```{r fig.width = 7, fig.height = 2}
+df |>
+  ggplot(aes(xdist = mu_hat)) +
+  stat_slab(color = NA, fill = blue_, alpha = 0.05)+
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  scale_y_continuous(expand = expansion(0, 0)) +
+  geom_vline(xintercept = 0, alpha = 0.1) +
+  labs(y = "") 
+
+```
+
+```{r}
+df |>
+  ggplot(aes(xdist = mu_hat)) +
+  stat_slab(slab_type = "cdf", color = blue_, fill = NA, alpha = 0.2, scale = 1) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  geom_vline(xintercept = 0, alpha = 0.25) +
+  scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  labs(y = "confidence distribution / one-sided p value")
+```
+
+```{r}
+k = 300
+
+x = seq(xmin, xmax, length.out = k)
+mu_cdfs = cdf(df$mu_hat, x)
+
+cdf_sym_ = function(..., fun = min) {
+  x = c(...)
+  x_sym = 0.5 - abs(x - 0.5)
+  fun(x_sym)
+}
+
+pbox_df = tibble(
+  x,
+  cdf_min = pmap_dbl(mu_cdfs, min),
+  cdf_max = pmap_dbl(mu_cdfs, max),
+  # cdf_min_sym = 0.5 - abs(cdf_min - 0.5),
+  # cdf_max_sym = 0.5 - abs(cdf_max - 0.5),
+  # sym_min = pmin(cdf_min_sym, cdf_max_sym),
+  # sym_max = pmax(cdf_min_sym, cdf_max_sym)
+  sym_min = pmap_dbl(mu_cdfs, cdf_sym_, fun = min),
+  sym_max = pmap_dbl(mu_cdfs, cdf_sym_, fun = max)
+)
+
+# ensure median interval is flat
+pbox_df$sym_max[min(df$mu) <= pbox_df$x & pbox_df$x <= max(df$mu)] = 0.5
+
+pbox_df
+```
+
+
+```{r}
+df |>
+  ggplot() +
+  geom_ribbon(aes(ymin = cdf_min, ymax = cdf_max, x = x), data = pbox_df, fill = "gray75") +
+  stat_slab(aes(xdist = mu_hat), slab_type = "cdf", color = blue_, fill = NA, alpha = 0.2, scale = 1) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  geom_vline(xintercept = 0, alpha = 0.25) +
+  scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  labs(y = "confidence distribution / one-sided p value")
+```
+
+```{r}
+df |>
+  ggplot() +
+  geom_ribbon(aes(ymin = cdf_min, ymax = cdf_max, x = x), data = pbox_df, fill = "gray65") +
+  geom_line(aes(y = sym_max, x = x), data = filter(pbox_df, sym_max == 0.5), color = "black", size = 1) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  geom_vline(xintercept = 0, alpha = 0.25) +
+  labs(y = "confidence distribution / one-sided p value")
+```
+
+
+```{r}
+df |>
+  ggplot() +
+  geom_ribbon(aes(ymin = cdf_min, ymax = cdf_max, x = x), data = pbox_df, fill = "gray95") +
+  geom_ribbon(aes(ymin = sym_min, ymax = sym_max, x = x), data = pbox_df, fill = "gray65") +
+  geom_line(aes(y = sym_max, x = x), data = filter(pbox_df, sym_max == 0.5), color = "black", size = 1) +
+  # geom_line(aes(y = sym_min, x = x), data = pbox_df, color = "red") +
+  # geom_line(aes(y = sym_max, x = x), data = pbox_df, color = "blue") +
+  # stat_slab(aes(xdist = mu_hat), slab_type = "cdf", color = blue_, fill = NA, alpha = 0.2, scale = 1) +
+  scale_x_continuous(limits = c(xmin, xmax)) +
+  scale_y_continuous(breaks = seq(0, 1, by = .1)) +
+  geom_vline(xintercept = 0, alpha = 0.25) +
+  labs(y = "confidence distribution / one-sided p value")
+```

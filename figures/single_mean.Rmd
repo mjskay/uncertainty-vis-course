@@ -1,0 +1,219 @@
+---
+title: "uncertainty-types"
+output: html_document
+---
+
+## Setup
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(tidybayes)
+library(cowplot)
+library(broom)
+library(brms)
+library(colorspace)
+library(magrittr)
+library(patchwork)
+
+theme_set(theme_tidybayes())
+```
+
+## Colors
+
+```{r}
+col_true = "#666666"
+col_true_light = hex(mixcolor(.8, hex2RGB(col_true), hex2RGB("#FFFFFF")))
+col_parameter = "#D66127"
+col_parameter_light = hex(mixcolor(.8, hex2RGB(col_parameter), hex2RGB("#FFFFFF")))
+col_predictive = "#7570B3"
+col_predictive_light = hex(mixcolor(.8, hex2RGB(col_predictive), hex2RGB("#FFFFFF")))
+```
+
+
+## Population with mean
+
+### for a normal
+
+```{r}
+dist_name = "norm"
+dist_r = rnorm
+
+true_mean = 3.5
+true_sd = 1.75
+param_1 = true_mean
+param_2 = true_sd
+```
+
+### for a lognormal
+
+```{r}
+dist_name = "lnorm"
+dist_r = rlnorm
+
+param_1 = log(true_mean) - log((true_sd^2/true_mean^2) + 1)/2
+param_2 = sqrt(log((true_sd^2/true_mean^2) + 1))
+```
+
+
+### Generate data
+
+```{r}
+set.seed(1234)
+n = 1000
+
+df = tibble(
+  id = 1:n,
+  y = dist_r(n, param_1, param_2)
+)
+```
+
+```{r}
+x_range = range(df$y) + c(-2, 2)
+```
+
+
+## Subsets
+
+```{r}
+df_subsets = tibble(
+  k = c(5,20,80,160,1000),
+  data = map(k, ~ filter(df, id <= .x))
+) %>%
+  unnest(data)
+```
+
+Subset statistics:
+
+```{r}
+df_subset_stats = df_subsets %>%
+  group_by(k) %>%
+  summarise(
+    sd = sd(y),
+    stats = list(tidy(t.test(y)))
+  ) %>%
+  unnest(stats) %>%
+  mutate(
+    mean = estimate,
+    se = estimate / statistic,
+    dof = parameter
+  )
+```
+
+
+## Parameter uncertainty
+
+```{r fig.width = 5, fig.height = 4}
+x_scale = scale_x_continuous(limits = x_range)
+y_scale = list(
+  scale_y_continuous(breaks = NULL),
+  ylab(NULL),
+  theme(axis.line.y = element_blank())
+)
+
+param_plot = df_subsets %>%
+  ggplot(aes(y = 0)) +
+  stat_dist_halfeyeh(
+    aes(dist = "student_t", arg1 = dof, arg2 = mean, arg3 = se), 
+    data = df_subset_stats,
+    n = 1001, color = col_parameter, slab_color = col_parameter, 
+    slab_fill = col_parameter_light,
+    normalize = "panels"
+  ) +
+  geom_vline(
+    xintercept = true_mean, color = col_true, size = 1,
+    linetype = "dotted"
+  ) +
+  geom_point(aes(x = y, y = -0.3), alpha = 0.25) +
+  facet_grid(k ~ .) +
+  x_scale +
+  y_scale 
+
+param_plot
+```
+
+## Predictive uncertainty
+
+```{r fig.width = 5, fig.height = 4}
+pred_plot = df_subsets %>%
+  ggplot(aes(y = 0)) +
+  stat_dist_halfeyeh(
+    aes(dist = "student_t", arg1 = dof, arg2 = mean, arg3 = sd), 
+    data = df_subset_stats,
+    n = 1001, color = col_predictive, slab_color = col_predictive, 
+    slab_fill = col_predictive_light,
+    normalize = "panels"
+  ) +
+  stat_dist_slabh(
+    aes(dist = dist_name, arg1 = param_1, arg2 = param_2),
+    data = tibble(k = unique(df_subsets$k)),
+    n = 1001, color = col_true, slab_color = col_true, 
+    slab_fill = NA,
+    linetype = "dotted",
+    normalize = "panels"
+  ) +
+  geom_point(aes(x = y, y = -0.3), alpha = 0.25) +
+  facet_grid(k ~ .) +
+  x_scale +
+  y_scale
+
+pred_plot
+```
+
+
+## True mean
+
+```{r fig.width = 5, fig.height = 1.25}
+mean_plot = tibble() %>%
+  ggplot(aes(y = 0)) +
+  stat_dist_slabh(
+    aes(dist = dist_name, arg1 = param_1, arg2 = param_2),
+    n = 1001,
+    slab_fill = col_true_light,
+    normalize = "panels"
+  ) +
+  geom_vline(
+    xintercept = true_mean, color = col_true, size = 1,
+    linetype = "dotted"
+  ) +
+  facet_grid("true" ~ .) +
+  x_scale +
+  y_scale
+
+mean_plot
+```
+
+## True distribution
+
+```{r fig.width = 5, fig.height = 1.25}
+pop_plot = tibble() %>%
+  ggplot(aes(y = 0)) +
+  stat_dist_slabh(
+    aes(dist = dist_name, arg1 = param_1, arg2 = param_2),
+    n = 1001, color = col_true, slab_color = col_true, 
+    slab_fill = col_true_light,
+    linetype = "dotted",
+    normalize = "panels"
+  ) +
+  facet_grid("true" ~ .) +
+  x_scale +
+  y_scale
+
+pop_plot
+```
+
+
+## Altogether
+
+```{r, fig.width = 8, fig.height = 4}
+(mean_plot + pop_plot) /
+  (param_plot + pred_plot) +
+  plot_layout(heights = c(1, 6))
+```
+
+```{r}
+ggsave(paste0("single_mean_", dist_name, ".pdf"), useDingbats = FALSE, width = 8, height = 4)
+```
+
+
+
+

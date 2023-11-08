@@ -1,0 +1,114 @@
+---
+title: "spaghetti correlation"
+output: html_document
+---
+
+## Setup
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(tidybayes)
+library(cowplot)
+library(broom)
+library(brms)
+library(colorspace)
+library(magrittr)
+library(patchwork)
+
+theme_set(theme_tidybayes())
+```
+
+## Colors
+
+```{r}
+col_true = "#666666"
+col_true_light = hex(mixcolor(.8, hex2RGB(col_true), hex2RGB("#FFFFFF")))
+col_parameter = "#D66127"
+col_parameter_light = hex(mixcolor(.8, hex2RGB(col_parameter), hex2RGB("#FFFFFF")))
+col_predictive = "#7570B3"
+col_predictive_light = hex(mixcolor(.8, hex2RGB(col_predictive), hex2RGB("#FFFFFF")))
+```
+
+
+## Population with mean
+
+### generate a bunch of correlated draws
+
+```{r}
+set.seed(1234)
+
+k = 20
+m = 9000
+
+
+df = bind_rows(map(1:m, ~
+  tibble(
+    draw = .x,
+    x = seq(1, 10, length.out = k),
+    sd = seq(3, 1, length.out = k),
+    err = rnorm(k, mean = 0, sd = sd),
+    y = 11 + x * 5 + cumsum(err)
+  )
+))
+```
+
+### intervals
+
+```{r, fig.width = 6, fig.height = 5}
+scale_ = list(
+  scale_fill_brewer(guide = guide_legend(reverse = TRUE)),
+  scale_y_continuous(limits = c(0,109)),
+  scale_x_continuous(limits = c(1,10)),
+  coord_cartesian(expand = FALSE)
+)
+
+df %>%
+  ggplot(aes(x = x, y = y)) + 
+  stat_lineribbon() +
+  scale_
+```
+
+```{r}
+ggsave("spaghetti_corr_intervals.pdf", useDingbats = FALSE, width = 6, height = 5)
+```
+
+
+### spaghetti
+
+```{r, fig.width = 6, fig.height = 5}
+n_draw = 100
+
+spag_df = df %>%
+  filter(draw <= n_draw)
+
+df %>%
+  ggplot(aes(x = x, y = y)) + 
+  geom_line(aes(group = draw), alpha = sqrt(1/n_draw), data = spag_df) +
+  stat_lineribbon(alpha = .2) +
+  scale_
+```
+
+```{r}
+ggsave("spaghetti_corr.pdf", useDingbats = FALSE, width = 6, height = 5)
+```
+
+### uncorrelated spaghetti
+
+```{r, fig.width = 6, fig.height = 5}
+n_draw = 100
+
+spag_df = df %>%
+  filter(draw <= n_draw) %>%
+  group_by(x) %>%
+  mutate(draw = sample(draw, n())) 
+
+df %>%
+  ggplot(aes(x = x, y = y)) + 
+  geom_line(aes(group = draw), alpha = sqrt(1/n_draw), data = spag_df) +
+  stat_lineribbon(alpha = .2) +
+  scale_
+```
+
+```{r}
+ggsave("spaghetti_uncorr.pdf", useDingbats = FALSE, width = 6, height = 5)
+```
